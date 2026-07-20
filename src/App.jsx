@@ -107,6 +107,7 @@ export default function TsuzukeruApp() {
   const [teammateLogsCache, setTeammateLogsCache] = useState({}); // { ownerKey: {date: rank} }
   const [selectedDay, setSelectedDay] = useState(null); // { ownerKey, ownerName, date } for the stamp panel
   const [myStamps, setMyStamps] = useState({}); // { emoji: count } received by me, across all days
+  const [confirmLeave, setConfirmLeave] = useState(false); // confirmation step for unregistering
 
   const today = todayStr();
 
@@ -344,16 +345,6 @@ export default function TsuzukeruApp() {
     }
   };
 
-  const saveLogs = async (next) => {
-    setLogs(next);
-    if (!profile) return;
-    try {
-      await storage.set(logKey(sanitizeName(profile.name)), JSON.stringify(next));
-    } catch (e) {
-      showToast("保存に失敗しました");
-    }
-  };
-
   const saveCheers = async (next) => {
     setCheers(next);
     if (!profile) return;
@@ -387,10 +378,41 @@ export default function TsuzukeruApp() {
     showToast(next ? "グループに共有します😊" : "共有をやめました。記録はあなただけに残ります");
   };
 
+  // Writes a single day's rank (or removes it) without ever overwriting the
+  // whole log dict blindly. It re-reads whatever is currently saved first —
+  // so if this same name was just used on another device, that device's
+  // changes are folded in rather than clobbered — then only changes the one
+  // date this action actually touched.
+  const mergeAndSaveLogDate = async (targetDate, rankOrNull) => {
+    const optimistic = { ...logs };
+    if (rankOrNull) optimistic[targetDate] = rankOrNull;
+    else delete optimistic[targetDate];
+    setLogs(optimistic);
+
+    if (!profile) return optimistic;
+    const key = logKey(sanitizeName(profile.name));
+    try {
+      let base = {};
+      try {
+        const remote = await storage.get(key);
+        if (remote?.value) base = JSON.parse(remote.value);
+      } catch (e) {
+        /* nothing saved remotely yet */
+      }
+      if (rankOrNull) base[targetDate] = rankOrNull;
+      else delete base[targetDate];
+      await storage.set(key, JSON.stringify(base));
+      setLogs(base); // reconcile — may include entries another device just added
+      return base;
+    } catch (e) {
+      showToast("保存に失敗しました");
+      return optimistic;
+    }
+  };
+
   const checkIn = async (rank, targetDate = today) => {
     const isToday = targetDate === today;
-    const nextLogs = { ...logs, [targetDate]: rank };
-    saveLogs(nextLogs);
+    const nextLogs = await mergeAndSaveLogDate(targetDate, rank);
     showToast(isToday ? RANK_META[rank].emoji + " 今日も記録できました" : RANK_META[rank].emoji + ` ${targetDate.slice(5)} の種まきを記録しました`);
 
     if (!profile) return; // no name yet — feed post happens once name is set
@@ -412,9 +434,7 @@ export default function TsuzukeruApp() {
   };
 
   const clearDay = async (targetDate) => {
-    const nextLogs = { ...logs };
-    delete nextLogs[targetDate];
-    saveLogs(nextLogs);
+    const nextLogs = await mergeAndSaveLogDate(targetDate, null);
     showToast("記録を取り消しました");
 
     if (!profile || !shareLogs) return;
@@ -428,6 +448,54 @@ export default function TsuzukeruApp() {
       loadMemberStreaks();
     } catch (e) {
       showToast("取り消しの共有に失敗しました");
+    }
+  };
+
+  // Removes a registered person from the group: their profile record, task,
+  // logs, cheers, reaction preferences, today's feed entry, and any stamps
+  // they've received. (Stamps they gave to other people aren't swept up —
+  // that would mean scanning every other member's reaction history — so
+  // their name may still briefly appear inside someone else's past reactions.)
+  const deleteMember = async (name) => {
+    const key = sanitizeName(name);
+    const safeDelete = async (k) => {
+      try {
+        await storage.delete(k);
+      } catch (e) {
+        /* key didn't exist — nothing to do */
+      }
+    };
+    try {
+      await Promise.all([
+        safeDelete(`memberlog:${key}`),
+        safeDelete(taskKey(key)),
+        safeDelete(logKey(key)),
+        safeDelete(cheerKey(key)),
+        safeDelete(reactionSetKey(key)),
+        safeDelete(`feed:${today}:${key}`),
+      ]);
+      try {
+        const list = await storage.list(`react:${key}:`);
+        for (const k of list?.keys || []) {
+          await safeDelete(k);
+        }
+      } catch (e) {
+        /* best-effort cleanup of received stamps */
+      }
+      showToast(`${name}さんの記録を削除しました`);
+      if (profile && profile.name === name) {
+        setProfile(null);
+        window.localStorage.removeItem(NAME_STORAGE_KEY);
+        setTask(DEFAULT_TASK);
+        setLogs({});
+        setCheers([]);
+        setReactionSet(DEFAULT_REACTION_SET);
+        setReactionDraft(DEFAULT_REACTION_SET.join(" "));
+      }
+      loadFeed();
+      loadMemberStreaks();
+    } catch (e) {
+      showToast("削除に失敗しました");
     }
   };
 
@@ -570,6 +638,45 @@ export default function TsuzukeruApp() {
                 決定
               </button>
             </div>
+
+            {profile && (
+              <div className="mt-3 pt-3 border-t border-dashed border-[#E4DBCB]">
+                {!confirmLeave ? (
+                  <button
+                    onClick={() => setConfirmLeave(true)}
+                    className="text-[10.5px] text-[#9C9280] underline underline-offset-2"
+                  >
+                    登録を解除する（最初の状態に戻す）
+                  </button>
+                ) : (
+                  <div>
+                    <p className="text-[10.5px] text-[#B5651D] mb-2">
+                      登録を解除すると、あなたの記録・スタンプ・設定がすべて消えます。元に戻せません。よろしいですか？
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => setConfirmLeave(false)}
+                        className="flex-1 py-1.5 rounded-[10px] text-[11px]"
+                        style={{ background: "#F1EADB", color: "#6B6459" }}
+                      >
+                        やめる
+                      </button>
+                      <button
+                        onClick={() => {
+                          deleteMember(profile.name);
+                          setConfirmLeave(false);
+                          setShowNameEdit(false);
+                        }}
+                        className="flex-1 py-1.5 rounded-[10px] text-[11px]"
+                        style={{ background: "#B5651D", color: "#FAF6EE" }}
+                      >
+                        解除する
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -587,7 +694,12 @@ export default function TsuzukeruApp() {
                     <span className="text-sm text-[#6B6459]">日</span>
                   </div>
                   {profile && Object.keys(myStamps).length > 0 && (
-                    <div className="flex items-center gap-1 mt-2" title="もらったスタンプ">
+                    <div className="flex items-center gap-1 mt-2 flex-wrap" title="もらったスタンプ">
+                      <div className="flex items-center gap-1 rounded-full px-1.5 py-0.5" style={{ background: "#E6E9DC" }}>
+                        <span className="text-[9px] font-medium leading-none" style={{ color: "#5C6B45" }}>
+                          合計 {Object.values(myStamps).reduce((a, b) => a + b, 0)}
+                        </span>
+                      </div>
                       {Object.entries(myStamps).map(([emoji, count]) => (
                         <div key={emoji} className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5" style={{ background: "#F3E3D3" }}>
                           <span className="text-[10px] leading-none">{emoji}</span>

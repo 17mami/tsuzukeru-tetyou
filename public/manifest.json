@@ -1,0 +1,21 @@
+{
+  "name": "続ける手帳",
+  "short_name": "続ける手帳",
+  "description": "できる日もできない日も、種をまけば続いている。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF6EE",
+  "theme_color": "#FAF6EE",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

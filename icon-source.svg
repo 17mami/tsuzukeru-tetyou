@@ -1,0 +1,17 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" fill="#FAF6EE"/>
+  <!-- stem -->
+  <line x1="256" y1="440" x2="256" y2="220" stroke="#8C9574" stroke-width="14" stroke-linecap="round"/>
+  <!-- leaves -->
+  <path d="M256 340 C 210 320, 175 325, 155 285" stroke="#8C9574" stroke-width="12" fill="none" stroke-linecap="round"/>
+  <path d="M256 380 C 302 360, 337 365, 357 325" stroke="#8C9574" stroke-width="12" fill="none" stroke-linecap="round"/>
+  <!-- flower petals -->
+  <circle cx="256" cy="220" r="46" fill="#B5651D"/>
+  <circle cx="205" cy="196" r="34" fill="#D68A56"/>
+  <circle cx="307" cy="196" r="34" fill="#D68A56"/>
+  <circle cx="256" cy="158" r="34" fill="#D68A56"/>
+  <circle cx="222" cy="248" r="30" fill="#D68A56"/>
+  <circle cx="290" cy="248" r="30" fill="#D68A56"/>
+  <!-- center -->
+  <circle cx="256" cy="220" r="26" fill="#F3E3D3"/>
+</svg>
