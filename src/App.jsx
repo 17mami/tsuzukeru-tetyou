@@ -310,6 +310,22 @@ export default function TsuzukeruApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, logs, profile, shareLogs]);
 
+  // ---------- auto-refresh: quietly re-fetch group data every so often ----------
+  // so people don't have to manually reload the page to see updates from
+  // teammates. Only runs while the tab is actually visible, to avoid
+  // needless requests when the app is in the background.
+  useEffect(() => {
+    if (!loaded) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      loadFeed();
+      loadMemberStreaks();
+      loadMyStamps();
+    }, 25000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   useEffect(() => {
     loadReactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,11 +387,40 @@ export default function TsuzukeruApp() {
     }
   };
 
-  const saveShareLogs = (next) => {
-    // Purely a local, in-memory preference: it only gates what checkIn()
-    // sends to the shared feed/memberlog going forward.
+  const saveShareLogs = async (next) => {
     setShareLogs(next);
     showToast(next ? "グループに共有します😊" : "共有をやめました。記録はあなただけに残ります");
+
+    if (!profile) return;
+    const key = sanitizeName(profile.name);
+    try {
+      if (next) {
+        // re-share: push the current full record back up so the group sees it again
+        await storage.set(`memberlog:${key}`, JSON.stringify({ name: profile.name, logs }));
+        if (logs[today]) {
+          const entry = { name: profile.name, rank: logs[today], taskName: task.name, ts: Date.now() };
+          await storage.set(`feed:${today}:${key}`, JSON.stringify(entry));
+        }
+      } else {
+        // actually remove what's already been shared, not just stop future
+        // updates — otherwise the group keeps seeing whatever was last
+        // shared even after this toggle is switched off.
+        try {
+          await storage.delete(`memberlog:${key}`);
+        } catch (e) {
+          /* nothing shared yet */
+        }
+        try {
+          await storage.delete(`feed:${today}:${key}`);
+        } catch (e) {
+          /* no entry today */
+        }
+      }
+      loadFeed();
+      loadMemberStreaks();
+    } catch (e) {
+      showToast("共有設定の反映に失敗しました");
+    }
   };
 
   // Writes a single day's rank (or removes it) without ever overwriting the
